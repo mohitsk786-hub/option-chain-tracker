@@ -1,0 +1,117 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="theme-color" content="#1a1a2e">
+    <title>Option Chain Tracker</title>
+    <link rel="manifest" href="manifest.json">
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <!-- Login Screen -->
+    <div id="loginScreen" class="screen active">
+        <div class="login-container">
+            <div class="logo">🔥</div>
+            <h1>Option Chain Tracker</h1>
+            <p class="subtitle">Real-time OI Analysis</p>
+            
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="text" id="apiKey" placeholder="Enter API Key">
+            </div>
+            
+            <div class="form-group">
+                <label>Client Code</label>
+                <input type="text" id="clientCode" placeholder="Enter Client Code">
+            </div>
+            
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" placeholder="Enter Password">
+            </div>
+            
+            <div class="form-group">
+                <label>TOTP (Optional)</label>
+                <input type="text" id="totp" placeholder="Enter TOTP if enabled">
+            </div>
+            
+            <button id="loginBtn" class="btn-primary">Login</button>
+            
+            <div id="loginStatus" class="status-msg"></div>
+        </div>
+    </div>
+
+    <!-- Main App Screen -->
+    <div id="appScreen" class="screen">
+        <!-- Header -->
+        <header class="app-header">
+            <div class="header-top">
+                <h2 id="symbolName">NIFTY</h2>
+                <div class="spot-price" id="spotPrice">--</div>
+            </div>
+            
+            <div class="header-controls">
+                <div class="symbol-buttons">
+                    <button class="btn-symbol active" data-symbol="NIFTY">NIFTY</button>
+                    <button class="btn-symbol" data-symbol="BANKNIFTY">BANKNIFTY</button>
+                </div>
+                
+                <div class="timeframe-selector">
+                    <label>Timeframe:</label>
+                    <select id="timeframeSelect">
+                        <option value="30s">30 Seconds</option>
+                        <option value="1m" selected>1 Minute</option>
+                        <option value="2m">2 Minutes</option>
+                        <option value="3m">3 Minutes</option>
+                        <option value="5m">5 Minutes</option>
+                        <option value="10m">10 Minutes</option>
+                        <option value="15m">15 Minutes</option>
+                        <option value="30m">30 Minutes</option>
+                        <option value="1h">1 Hour</option>
+                        <option value="2h">2 Hours</option>
+                        <option value="4h">4 Hours</option>
+                        <option value="1d">1 Day</option>
+                    </select>
+                </div>
+                
+                <div class="auto-refresh">
+                    <label>
+                        <input type="checkbox" id="autoRefresh" checked>
+                        Auto (2s)
+                    </label>
+                </div>
+            </div>
+            
+            <div class="status-bar">
+                <span id="statusMsg">Connecting...</span>
+                <span id="lastUpdate"></span>
+            </div>
+        </header>
+
+        <!-- Option Chain Data -->
+        <div class="option-chain-container">
+            <div class="table-header">
+                <div class="header-ce">CALLS</div>
+                <div class="header-strike">STRIKE</div>
+                <div class="header-pe">PUTS</div>
+            </div>
+            
+            <div id="optionChainData" class="option-chain-data">
+                <!-- Data will be inserted here -->
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loader" class="loader hidden">
+            <div class="spinner"></div>
+            <p>Loading data...</p>
+        </div>
+
+        <!-- Logout Button -->
+        <button id="logoutBtn" class="btn-logout">Logout</button>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

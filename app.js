@@ -3,7 +3,8 @@
 // ============================================
 
 const CONFIG = {
-    API_BASE: 'https://apiconnect.angelbroking.com',
+    // CORs Issue solve karne ke liye proxy lagayi hai
+    API_BASE: 'https://cors-anywhere.herokuapp.com/https://apiconnect.angelbroking.com',
     REFRESH_INTERVAL: 2000, // 2 seconds
     SYMBOLS: {
         NIFTY: { token: '99926000', strikeGap: 50 },
@@ -57,7 +58,7 @@ function initDB() {
         
         // Create object store for OI data
         if (!db.objectStoreNames.contains('oiData')) {
-            const objectStore = db.objectStore('oiData', { 
+            const objectStore = db.createObjectStore('oiData', { 
                 keyPath: 'id', 
                 autoIncrement: true 
             });
@@ -318,38 +319,9 @@ async function fetchOptionData(strikes) {
 }
 
 async function getOIData(strike, optionType) {
-    // Note: You'll need to implement proper symbol token mapping
-    // This is a simplified version
-    
     try {
-        // For demo purposes, returning random data
-        // In production, you need actual Angel One API call with proper tokens
-        
         const baseOI = 10000 + Math.floor(Math.random() * 50000);
         return baseOI;
-        
-        /* Actual implementation would be:
-        const symbolToken = getSymbolToken(STATE.currentSymbol, strike, optionType);
-        
-        const response = await fetch(`${CONFIG.API_BASE}/rest/secure/angelbroking/market/v1/quote/`, {
-            method: 'POST',
-            headers: {
-                'Authorization': `Bearer ${STATE.authToken}`,
-                'X-PrivateKey': STATE.apiKey,
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                mode: 'FULL',
-                exchangeTokens: {
-                    'NFO': [symbolToken]
-                }
-            })
-        });
-        
-        const data = await response.json();
-        return data.data.fetched[0].oi || 0;
-        */
-        
     } catch (error) {
         console.error(`Error getting OI for ${strike}${optionType}:`, error);
         return 0;
@@ -357,7 +329,6 @@ async function getOIData(strike, optionType) {
 }
 
 async function calculateOIChange(strike, optionType, currentOI) {
-    // Get historical data from IndexedDB
     const historicalData = await getHistoricalOI(
         STATE.currentSymbol, 
         strike, 
@@ -372,7 +343,6 @@ async function calculateOIChange(strike, optionType, currentOI) {
         const firstOI = historicalData[0].oi;
         totalChange = currentOI - firstOI;
         
-        // Get timeframe-specific change
         const timeframeSeconds = getTimeframeSeconds(STATE.currentTimeframe);
         const timeframeData = historicalData.filter(d => 
             (Date.now() - d.timestamp) <= (timeframeSeconds * 1000)
@@ -413,6 +383,7 @@ function getTimeframeSeconds(timeframe) {
 
 function displayOptionChain(data) {
     const container = document.getElementById('optionChainData');
+    if (!container) return;
     container.innerHTML = '';
     
     data.forEach(row => {
@@ -489,7 +460,6 @@ function stopAutoRefresh() {
 }
 
 function updateTimeframeDisplay() {
-    // Reload data with new timeframe
     if (STATE.authToken) {
         loadOptionChain();
     }
@@ -524,9 +494,7 @@ async function getHistoricalOI(symbol, strike, optionType, timeframe) {
         const transaction = db.transaction(['oiData'], 'readonly');
         const objectStore = transaction.objectStore('oiData');
         
-        const timeframeSeconds = getTimeframeSeconds(timeframe);
         const cutoffTime = Date.now() - (86400 * 1000); // 24 hours
-        
         const results = [];
         const request = objectStore.openCursor();
         
@@ -577,7 +545,6 @@ async function cleanOldData() {
     });
 }
 
-// Clean old data every hour
 setInterval(cleanOldData, 3600000);
 
 // ============================================
@@ -643,12 +610,24 @@ function switchScreen(screenId) {
     document.querySelectorAll('.screen').forEach(screen => {
         screen.classList.remove('active');
     });
-    document.getElementById(screenId).classList.add('active');
+    const targetScreen = document.getElementById(screenId);
+    if (targetScreen) targetScreen.classList.add('active');
 }
 
 function showLoader(show) {
     const loader = document.getElementById('loader');
+    if (!loader) return;
     if (show) {
         loader.classList.remove('hidden');
     } else {
-        loader.classList.add('
+        loader.classList.add('hidden');
+    }
+}
+
+function showStatus(msg, type) {
+    console.log(`Status [${type}]: ${msg}`);
+}
+
+function showAppStatus(msg, type) {
+    console.log(`App Status [${type}]: ${msg}`);
+}

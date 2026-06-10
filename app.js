@@ -1,20 +1,15 @@
 // ============================================
-// NSE India API - Option Chain Tracker
-// No Login Required! Direct Free Data!
+// NSE Option Chain - CORS Proxy Fixed
 // ============================================
 
 const CONFIG = {
+    // Using CORS Anywhere proxy
+    CORS_PROXY: 'https://corsproxy.io/?',
     NSE_BASE: 'https://www.nseindia.com/api',
-    REFRESH_INTERVAL: 3000, // 3 seconds
+    REFRESH_INTERVAL: 5000, // 5 seconds
     SYMBOLS: {
-        NIFTY: { 
-            name: 'NIFTY',
-            strikeGap: 50
-        },
-        BANKNIFTY: { 
-            name: 'BANKNIFTY',
-            strikeGap: 100
-        }
+        NIFTY: { name: 'NIFTY', strikeGap: 50 },
+        BANKNIFTY: { name: 'BANKNIFTY', strikeGap: 100 }
     }
 };
 
@@ -25,90 +20,57 @@ let STATE = {
     refreshTimer: null,
     spotPrice: 0,
     atmStrike: 0,
-    isInitialLoad: true
+    oiData: {} // Store OI data in memory
 };
 
-let db;
-
 // ============================================
-// Initialize App
+// Initialize
 // ============================================
 
 window.addEventListener('load', async () => {
     console.log('🚀 App starting...');
-    
-    await initDB();
     setupEventListeners();
-    registerServiceWorker();
-    
-    // Start fetching data
-    await setCookies();
     await loadOptionChain();
     startAutoRefresh();
 });
 
 // ============================================
-// NSE Cookies Setup (Important!)
-// ============================================
-
-async function setCookies() {
-    try {
-        showLoader(true);
-        showAppStatus('Initializing...', 'info');
-        
-        await fetch('https://www.nseindia.com', {
-            method: 'GET',
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': '*/*'
-            }
-        });
-        
-        console.log('✅ NSE cookies set');
-        
-    } catch (error) {
-        console.error('Cookie setup error:', error);
-    }
-}
-
-// ============================================
-// Option Chain Functions
+// Load Option Chain (CORS Fixed)
 // ============================================
 
 async function loadOptionChain() {
     showLoader(true);
+    showAppStatus('📡 Fetching NSE data...', 'info');
     
     try {
         const symbol = STATE.currentSymbol;
         
-        // Fetch option chain from NSE
-        const url = `${CONFIG.NSE_BASE}/option-chain-indices?symbol=${symbol}`;
+        // Build URL with CORS proxy
+        const nseUrl = `${CONFIG.NSE_BASE}/option-chain-indices?symbol=${symbol}`;
+        const url = CONFIG.CORS_PROXY + encodeURIComponent(nseUrl);
+        
+        console.log('🔗 Fetching:', url);
         
         const response = await fetch(url, {
             method: 'GET',
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': '*/*',
-                'Accept-Language': 'en-US,en;q=0.9',
-                'Referer': 'https://www.nseindia.com/option-chain'
-            },
-            credentials: 'include'
+                'Accept': 'application/json'
+            }
         });
         
         if (!response.ok) {
-            throw new Error(`NSE API returned ${response.status}`);
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
         }
         
         const data = await response.json();
+        console.log('✅ Data received');
         
         if (!data.records || !data.records.data) {
             throw new Error('Invalid data format from NSE');
         }
         
-        // Extract spot price
+        // Process data
         STATE.spotPrice = data.records.underlyingValue;
-        
-        // Calculate ATM strike
         const strikeGap = CONFIG.SYMBOLS[symbol].strikeGap;
         STATE.atmStrike = Math.round(STATE.spotPrice / strikeGap) * strikeGap;
         
@@ -116,42 +78,36 @@ async function loadOptionChain() {
         document.getElementById('spotPrice').textContent = STATE.spotPrice.toFixed(2);
         document.getElementById('symbolName').textContent = symbol;
         
-        // Filter strikes (ATM ± 5)
+        // Filter and display strikes
         const filteredData = filterStrikes(data.records.data, STATE.atmStrike, strikeGap);
-        
-        // Process and store OI data
-        const processedData = await processOptionData(filteredData);
-        
-        // Display
+        const processedData = processOptionData(filteredData);
         displayOptionChain(processedData);
         
-        const now = new Date();
-        const timeStr = now.toLocaleTimeString('en-IN', { 
-            hour: '2-digit', 
+        const timeStr = new Date().toLocaleTimeString('en-IN', {
+            hour: '2-digit',
             minute: '2-digit',
             second: '2-digit'
         });
         
         showAppStatus(`✅ Updated: ${timeStr}`, 'success');
-        document.getElementById('lastUpdate').textContent = `Last: ${timeStr}`;
-        
-        if (STATE.isInitialLoad) {
-            STATE.isInitialLoad = false;
-            console.log('✅ Initial load complete');
-        }
+        document.getElementById('lastUpdate').textContent = timeStr;
         
     } catch (error) {
-        console.error('Load error:', error);
-        showAppStatus(`⚠️ Error: ${error.message}`, 'error');
+        console.error('❌ Error:', error);
+        showAppStatus(`❌ ${error.message}`, 'error');
         
-        // Retry after 5 seconds on error
+        // Retry after 10 seconds
         if (STATE.autoRefresh) {
-            setTimeout(() => loadOptionChain(), 5000);
+            setTimeout(() => loadOptionChain(), 10000);
         }
     } finally {
         showLoader(false);
     }
 }
+
+// ============================================
+// Filter Strikes (ATM ± 5)
+// ============================================
 
 function filterStrikes(data, atmStrike, strikeGap) {
     const strikes = [];
@@ -173,70 +129,98 @@ function filterStrikes(data, atmStrike, strikeGap) {
     return strikes;
 }
 
-async function processOptionData(strikes) {
+// ============================================
+// Process Option Data
+// ============================================
+
+function processOptionData(strikes) {
     const timestamp = Date.now();
     const processedData = [];
     
     for (const strikeData of strikes) {
         const strike = strikeData.strike;
+        const key = `${STATE.currentSymbol}_${strike}`;
         
-        // CE data
-        const ceOI = strikeData.CE.openInterest || 0;
-        const ceChange = strikeData.CE.changeinOpenInterest || 0;
-        const ceVolume = strikeData.CE.totalTradedVolume || 0;
-        const ceLTP = strikeData.CE.lastPrice || 0;
+        // CE Data
+        const ceCurrentOI = strikeData.CE.openInterest || 0;
+        const ceChangeNSE = strikeData.CE.changeinOpenInterest || 0;
         
-        // PE data
-        const peOI = strikeData.PE.openInterest || 0;
-        const peChange = strikeData.PE.changeinOpenInterest || 0;
-        const peVolume = strikeData.PE.totalTradedVolume || 0;
-        const peLTP = strikeData.PE.lastPrice || 0;
+        // PE Data
+        const peCurrentOI = strikeData.PE.openInterest || 0;
+        const peChangeNSE = strikeData.PE.changeinOpenInterest || 0;
         
-        // Store in IndexedDB
-        await storeOIData(timestamp, STATE.currentSymbol, strike, 'CE', ceOI);
-        await storeOIData(timestamp, STATE.currentSymbol, strike, 'PE', peOI);
+        // Store first OI value (for running total)
+        if (!STATE.oiData[key + '_CE']) {
+            STATE.oiData[key + '_CE'] = {
+                first: ceCurrentOI,
+                previous: ceCurrentOI,
+                history: [{ time: timestamp, oi: ceCurrentOI }]
+            };
+        }
         
-        // Calculate timeframe changes
-        const ceTimeframeChange = await calculateTimeframeChange(strike, 'CE', ceOI);
-        const peTimeframeChange = await calculateTimeframeChange(strike, 'PE', peOI);
+        if (!STATE.oiData[key + '_PE']) {
+            STATE.oiData[key + '_PE'] = {
+                first: peCurrentOI,
+                previous: peCurrentOI,
+                history: [{ time: timestamp, oi: peCurrentOI }]
+            };
+        }
+        
+        // Update history (keep last 1 hour)
+        const ceHistory = STATE.oiData[key + '_CE'].history;
+        const peHistory = STATE.oiData[key + '_PE'].history;
+        
+        ceHistory.push({ time: timestamp, oi: ceCurrentOI });
+        peHistory.push({ time: timestamp, oi: peCurrentOI });
+        
+        // Clean old data (>1 hour)
+        const oneHourAgo = timestamp - (3600 * 1000);
+        STATE.oiData[key + '_CE'].history = ceHistory.filter(h => h.time > oneHourAgo);
+        STATE.oiData[key + '_PE'].history = peHistory.filter(h => h.time > oneHourAgo);
+        
+        // Calculate changes
+        const ceChangeFromStart = ceCurrentOI - STATE.oiData[key + '_CE'].first;
+        const peChangeFromStart = peCurrentOI - STATE.oiData[key + '_PE'].first;
+        
+        const ceTimeframeChange = calculateTimeframeChange(STATE.oiData[key + '_CE'].history, ceCurrentOI);
+        const peTimeframeChange = calculateTimeframeChange(STATE.oiData[key + '_PE'].history, peCurrentOI);
         
         processedData.push({
             strike: strike,
             isATM: strikeData.isATM,
             ce: {
-                totalOI: ceOI,
-                changeOI: ceChange,
-                timeframeChange: ceTimeframeChange,
-                volume: ceVolume,
-                ltp: ceLTP
+                totalOI: ceCurrentOI,
+                changeInOI: ceChangeFromStart,
+                timeframeChange: ceTimeframeChange
             },
             pe: {
-                totalOI: peOI,
-                changeOI: peChange,
-                timeframeChange: peTimeframeChange,
-                volume: peVolume,
-                ltp: peLTP
+                totalOI: peCurrentOI,
+                changeInOI: peChangeFromStart,
+                timeframeChange: peTimeframeChange
             }
         });
+        
+        // Update previous
+        STATE.oiData[key + '_CE'].previous = ceCurrentOI;
+        STATE.oiData[key + '_PE'].previous = peCurrentOI;
     }
     
     return processedData;
 }
 
-async function calculateTimeframeChange(strike, optionType, currentOI) {
+// ============================================
+// Calculate Timeframe Change
+// ============================================
+
+function calculateTimeframeChange(history, currentOI) {
     const timeframeSeconds = getTimeframeSeconds(STATE.currentTimeframe);
     const cutoffTime = Date.now() - (timeframeSeconds * 1000);
     
-    const historicalData = await getHistoricalOI(
-        STATE.currentSymbol,
-        strike,
-        optionType,
-        cutoffTime
-    );
+    // Find oldest value in timeframe
+    const oldData = history.find(h => h.time >= cutoffTime);
     
-    if (historicalData.length > 0) {
-        const oldestOI = historicalData[0].oi;
-        return currentOI - oldestOI;
+    if (oldData) {
+        return currentOI - oldData.oi;
     }
     
     return 0;
@@ -261,7 +245,7 @@ function getTimeframeSeconds(timeframe) {
 }
 
 // ============================================
-// Display Functions
+// Display Option Chain
 // ============================================
 
 function displayOptionChain(data) {
@@ -274,26 +258,49 @@ function displayOptionChain(data) {
         
         rowDiv.innerHTML = `
             <div class="ce-data">
-                <div class="oi-total">OI: ${formatNumber(row.ce.totalOI)}</div>
-                <div class="oi-change ${getChangeClass(row.ce.changeOI)}">
-                    Chg: ${formatChange(row.ce.changeOI)}
+                <div class="data-section">
+                    <div class="label">CE Total OI</div>
+                    <div class="value-big">${formatNumber(row.ce.totalOI)}</div>
                 </div>
-                <div class="oi-timeframe ${getChangeClass(row.ce.timeframeChange)}">
-                    ${STATE.currentTimeframe}: ${formatChange(row.ce.timeframeChange)}
+                
+                <div class="data-section">
+                    <div class="label">Change in OI</div>
+                    <div class="value-medium ${getChangeClass(row.ce.changeInOI)}">
+                        ${formatChange(row.ce.changeInOI)}
+                    </div>
+                </div>
+                
+                <div class="data-section timeframe-section">
+                    <div class="label">${STATE.currentTimeframe}</div>
+                    <div class="value-medium ${getChangeClass(row.ce.timeframeChange)}">
+                        ${formatChange(row.ce.timeframeChange)}
+                    </div>
                 </div>
             </div>
             
             <div class="strike-value">
-                ${row.strike}
+                <div class="strike-number">${row.strike}</div>
+                ${row.isATM ? '<div class="atm-badge">ATM</div>' : ''}
             </div>
             
             <div class="pe-data">
-                <div class="oi-total">OI: ${formatNumber(row.pe.totalOI)}</div>
-                <div class="oi-change ${getChangeClass(row.pe.changeOI)}">
-                    Chg: ${formatChange(row.pe.changeOI)}
+                <div class="data-section">
+                    <div class="label">PE Total OI</div>
+                    <div class="value-big">${formatNumber(row.pe.totalOI)}</div>
                 </div>
-                <div class="oi-timeframe ${getChangeClass(row.pe.timeframeChange)}">
-                    ${STATE.currentTimeframe}: ${formatChange(row.pe.timeframeChange)}
+                
+                <div class="data-section">
+                    <div class="label">Change in OI</div>
+                    <div class="value-medium ${getChangeClass(row.pe.changeInOI)}">
+                        ${formatChange(row.pe.changeInOI)}
+                    </div>
+                </div>
+                
+                <div class="data-section timeframe-section">
+                    <div class="label">${STATE.currentTimeframe}</div>
+                    <div class="value-medium ${getChangeClass(row.pe.timeframeChange)}">
+                        ${formatChange(row.pe.timeframeChange)}
+                    </div>
                 </div>
             </div>
         `;
@@ -329,19 +336,19 @@ function setupEventListeners() {
             document.querySelectorAll('.btn-symbol').forEach(b => b.classList.remove('active'));
             e.target.classList.add('active');
             STATE.currentSymbol = e.target.dataset.symbol;
+            STATE.oiData = {}; // Reset data
             loadOptionChain();
         });
     });
     
     // Timeframe selector
-    document.getElementById('timeframeSelect').addEventListener('change', (e) => {
+    document.getElementById('timeframeSelect')?.addEventListener('change', (e) => {
         STATE.currentTimeframe = e.target.value;
-        // Reload to recalculate timeframe changes
         loadOptionChain();
     });
     
-    // Auto-refresh toggle
-    document.getElementById('autoRefresh').addEventListener('change', (e) => {
+    // Auto-refresh
+    document.getElementById('autoRefresh')?.addEventListener('change', (e) => {
         STATE.autoRefresh = e.target.checked;
         if (STATE.autoRefresh) {
             startAutoRefresh();
@@ -356,9 +363,7 @@ function setupEventListeners() {
 // ============================================
 
 function startAutoRefresh() {
-    if (STATE.refreshTimer) {
-        clearInterval(STATE.refreshTimer);
-    }
+    if (STATE.refreshTimer) clearInterval(STATE.refreshTimer);
     
     STATE.refreshTimer = setInterval(() => {
         if (STATE.autoRefresh) {
@@ -366,7 +371,7 @@ function startAutoRefresh() {
         }
     }, CONFIG.REFRESH_INTERVAL);
     
-    console.log('✅ Auto-refresh started (3s interval)');
+    console.log('✅ Auto-refresh started (5s)');
 }
 
 function stopAutoRefresh() {
@@ -374,146 +379,37 @@ function stopAutoRefresh() {
         clearInterval(STATE.refreshTimer);
         STATE.refreshTimer = null;
     }
-    
     console.log('⏸️ Auto-refresh stopped');
 }
 
 // ============================================
-// IndexedDB Functions
-// ============================================
-
-function initDB() {
-    return new Promise((resolve, reject) => {
-        const request = indexedDB.open('OptionChainDB', 1);
-        
-        request.onerror = () => {
-            console.error('❌ Database failed');
-            reject(request.error);
-        };
-        
-        request.onsuccess = () => {
-            db = request.result;
-            console.log('✅ Database ready');
-            resolve();
-        };
-        
-        request.onupgradeneeded = (e) => {
-            db = e.target.result;
-            
-            if (!db.objectStoreNames.contains('oiData')) {
-                const objectStore = db.createObjectStore('oiData', { 
-                    keyPath: 'id', 
-                    autoIncrement: true 
-                });
-                objectStore.createIndex('timestamp', 'timestamp', { unique: false });
-                objectStore.createIndex('symbol', 'symbol', { unique: false });
-                objectStore.createIndex('strike', 'strike', { unique: false });
-                console.log('✅ Database created');
-            }
-        };
-    });
-}
-
-async function storeOIData(timestamp, symbol, strike, optionType, oi) {
-    if (!db) return;
-    
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['oiData'], 'readwrite');
-        const objectStore = transaction.objectStore('oiData');
-        
-        const request = objectStore.add({
-            timestamp,
-            symbol,
-            strike,
-            optionType,
-            oi
-        });
-        
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function getHistoricalOI(symbol, strike, optionType, cutoffTime) {
-    if (!db) return [];
-    
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['oiData'], 'readonly');
-        const objectStore = transaction.objectStore('oiData');
-        
-        const results = [];
-        const request = objectStore.openCursor();
-        
-        request.onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
-                const data = cursor.value;
-                if (
-                    data.symbol === symbol &&
-                    data.strike === strike &&
-                    data.optionType === optionType &&
-                    data.timestamp >= cutoffTime
-                ) {
-                    results.push(data);
-                }
-                cursor.continue();
-            } else {
-                resolve(results.sort((a, b) => a.timestamp - b.timestamp));
-            }
-        };
-        
-        request.onerror = () => reject(request.error);
-    });
-}
-
-// Clean old data every hour (>24 hours)
-setInterval(() => {
-    if (!db) return;
-    
-    const cutoff = Date.now() - (86400 * 1000); // 24 hours
-    const transaction = db.transaction(['oiData'], 'readwrite');
-    const objectStore = transaction.objectStore('oiData');
-    const request = objectStore.openCursor();
-    
-    let deletedCount = 0;
-    
-    request.onsuccess = (e) => {
-        const cursor = e.target.result;
-        if (cursor) {
-            if (cursor.value.timestamp < cutoff) {
-                cursor.delete();
-                deletedCount++;
-            }
-            cursor.continue();
-        } else {
-            if (deletedCount > 0) {
-                console.log(`🗑️ Cleaned ${deletedCount} old records`);
-            }
-        }
-    };
-}, 3600000); // Every hour
-
-// ============================================
-// UI Helper Functions
+// UI Helpers
 // ============================================
 
 function showLoader(show) {
     const loader = document.getElementById('loader');
-    if (show) {
-        loader.classList.remove('hidden');
-    } else {
-        loader.classList.add('hidden');
+    if (loader) {
+        if (show) {
+            loader.classList.remove('hidden');
+        } else {
+            loader.classList.add('hidden');
+        }
     }
 }
 
 function showAppStatus(message) {
-    document.getElementById('statusMsg').textContent = message;
+    const statusEl = document.getElementById('statusMsg');
+    if (statusEl) {
+        statusEl.textContent = message;
+    }
 }
 
 function registerServiceWorker() {
     if ('serviceWorker' in navigator) {
         navigator.serviceWorker.register('sw.js')
-            .then(() => console.log('✅ Service Worker registered'))
-            .catch(err => console.error('❌ SW registration failed:', err));
+            .then(() => console.log('✅ SW registered'))
+            .catch(err => console.error('SW error:', err));
     }
 }
+
+console.log('✅ App.js loaded successfully');

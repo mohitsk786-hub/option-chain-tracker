@@ -1,9 +1,15 @@
 {
   "name": "option-chain-tracker",
-  "version": "1.0.0",
-  "description": "Real-time NSE Option Chain Tracker",
+  "version": "2.0.0",
+  "description": "Real-time NSE Option Chain OI Tracker",
+  "author": "Your Name",
+  "license": "MIT",
   "scripts": {
     "dev": "vercel dev",
-    "build": "echo 'No build needed'"
+    "deploy": "vercel --prod"
+  },
+  "dependencies": {},
+  "engines": {
+    "node": ">=18.x"
   }
 }

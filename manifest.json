@@ -1,7 +1,7 @@
 {
   "name": "Option Chain Tracker",
   "short_name": "OI Tracker",
-  "description": "Real-time Option Chain OI Analysis for Angel One",
+  "description": "Real-time NSE Option Chain OI Analysis",
   "start_url": "/",
   "display": "standalone",
   "background_color": "#1a1a2e",

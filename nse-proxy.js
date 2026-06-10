@@ -1,12 +1,14 @@
-// NSE Proxy - Vercel Serverless Function
-// This bypasses CORS by making server-side request
+// NSE Proxy - Serverless Function for Vercel
+// Bypasses CORS and fetches real NSE data
 
 export default async function handler(req, res) {
-    // CORS headers
+    // Enable CORS
+    res.setHeader('Access-Control-Allow-Credentials', 'true');
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET, OPTIONS');
+    res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
     res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
     
+    // Handle OPTIONS request
     if (req.method === 'OPTIONS') {
         return res.status(200).end();
     }
@@ -14,48 +16,53 @@ export default async function handler(req, res) {
     try {
         const { symbol = 'NIFTY' } = req.query;
         
-        console.log('📡 Fetching NSE data for:', symbol);
+        console.log(`📡 Fetching NSE data for: ${symbol}`);
         
-        // First request to set cookies
-        const cookieResponse = await fetch('https://www.nseindia.com', {
-            headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'Connection': 'keep-alive'
-            }
+        // Step 1: Visit NSE homepage to set cookies
+        const baseHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive'
+        };
+        
+        // Get cookies from homepage
+        const homeResponse = await fetch('https://www.nseindia.com', {
+            headers: baseHeaders
         });
         
-        const cookies = cookieResponse.headers.get('set-cookie') || '';
+        const setCookieHeaders = homeResponse.headers.raw()['set-cookie'];
+        const cookies = setCookieHeaders ? setCookieHeaders.join('; ') : '';
         
-        // Now fetch option chain data
-        const nseUrl = `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`;
+        console.log('🍪 Cookies obtained');
         
-        const response = await fetch(nseUrl, {
+        // Step 2: Fetch option chain data with cookies
+        const apiUrl = `https://www.nseindia.com/api/option-chain-indices?symbol=${symbol}`;
+        
+        const dataResponse = await fetch(apiUrl, {
             headers: {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'application/json, text/javascript, */*; q=0.01',
-                'Accept-Language': 'en-US,en;q=0.5',
-                'Accept-Encoding': 'gzip, deflate, br',
-                'X-Requested-With': 'XMLHttpRequest',
+                ...baseHeaders,
+                'Accept': 'application/json',
                 'Referer': 'https://www.nseindia.com/option-chain',
-                'Connection': 'keep-alive',
+                'X-Requested-With': 'XMLHttpRequest',
                 'Cookie': cookies
             }
         });
         
-        if (!response.ok) {
-            throw new Error(`NSE returned ${response.status}`);
+        if (!dataResponse.ok) {
+            throw new Error(`NSE API returned status: ${dataResponse.status}`);
         }
         
-        const data = await response.json();
+        const data = await dataResponse.json();
         
         console.log('✅ Data fetched successfully');
         
+        // Return success response
         return res.status(200).json({
             success: true,
-            data: data
+            data: data,
+            timestamp: new Date().toISOString()
         });
         
     } catch (error) {
@@ -63,7 +70,8 @@ export default async function handler(req, res) {
         
         return res.status(500).json({
             success: false,
-            error: error.message
+            error: error.message,
+            timestamp: new Date().toISOString()
         });
     }
 }

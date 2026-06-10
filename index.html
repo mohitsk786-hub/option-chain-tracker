@@ -4,12 +4,13 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
     <meta name="theme-color" content="#1a1a2e">
-    <title>Option Chain Tracker - NSE</title>
+    <meta name="description" content="Real-time NSE Option Chain OI Analysis">
+    <title>Option Chain Tracker - NSE Live</title>
     <link rel="manifest" href="manifest.json">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <!-- Main App Screen (Direct - No Login!) -->
+    <!-- Main App Screen -->
     <div id="appScreen" class="screen active">
         <!-- Header -->
         <header class="app-header">
@@ -45,13 +46,13 @@
                 <div class="auto-refresh">
                     <label>
                         <input type="checkbox" id="autoRefresh" checked>
-                        Auto (3s)
+                        Auto (5s)
                     </label>
                 </div>
             </div>
             
             <div class="status-bar">
-                <span id="statusMsg">Loading NSE data...</span>
+                <span id="statusMsg">Initializing...</span>
                 <span id="lastUpdate"></span>
             </div>
         </header>
@@ -65,12 +66,12 @@
             </div>
             
             <div id="optionChainData" class="option-chain-data">
-                <!-- Data will be inserted here -->
+                <!-- Data will be inserted here dynamically -->
             </div>
         </div>
 
         <!-- Loading Spinner -->
-        <div id="loader" class="loader">
+        <div id="loader" class="loader hidden">
             <div class="spinner"></div>
             <p>Loading NSE data...</p>
         </div>

@@ -1,208 +1,73 @@
 // ============================================
-// Configuration & Global Variables
+// NSE India API - Option Chain Tracker
+// No Login Required! Direct Free Data!
 // ============================================
 
 const CONFIG = {
-    // CORs Issue solve karne ke liye proxy lagayi hai
-    API_BASE: 'https://cors-anywhere.herokuapp.com/https://apiconnect.angelbroking.com',
-    REFRESH_INTERVAL: 2000, // 2 seconds
+    NSE_BASE: 'https://www.nseindia.com/api',
+    REFRESH_INTERVAL: 3000, // 3 seconds
     SYMBOLS: {
-        NIFTY: { token: '99926000', strikeGap: 50 },
-        BANKNIFTY: { token: '99926009', strikeGap: 100 }
+        NIFTY: { 
+            name: 'NIFTY',
+            strikeGap: 50
+        },
+        BANKNIFTY: { 
+            name: 'BANKNIFTY',
+            strikeGap: 100
+        }
     }
 };
 
 let STATE = {
-    authToken: null,
-    apiKey: null,
     currentSymbol: 'NIFTY',
     currentTimeframe: '1m',
     autoRefresh: true,
     refreshTimer: null,
     spotPrice: 0,
-    atmStrike: 0
+    atmStrike: 0,
+    isInitialLoad: true
 };
 
-// IndexedDB for data storage
 let db;
 
 // ============================================
 // Initialize App
 // ============================================
 
-window.addEventListener('load', () => {
-    initDB();
-    checkLoginStatus();
+window.addEventListener('load', async () => {
+    console.log('🚀 App starting...');
+    
+    await initDB();
     setupEventListeners();
     registerServiceWorker();
+    
+    // Start fetching data
+    await setCookies();
+    await loadOptionChain();
+    startAutoRefresh();
 });
 
 // ============================================
-// IndexedDB Setup
+// NSE Cookies Setup (Important!)
 // ============================================
 
-function initDB() {
-    const request = indexedDB.open('OptionChainDB', 1);
-    
-    request.onerror = () => {
-        console.error('Database failed to open');
-    };
-    
-    request.onsuccess = () => {
-        db = request.result;
-        console.log('✅ Database ready');
-    };
-    
-    request.onupgradeneeded = (e) => {
-        db = e.target.result;
-        
-        // Create object store for OI data
-        if (!db.objectStoreNames.contains('oiData')) {
-            const objectStore = db.createObjectStore('oiData', { 
-                keyPath: 'id', 
-                autoIncrement: true 
-            });
-            objectStore.createIndex('timestamp', 'timestamp', { unique: false });
-            objectStore.createIndex('symbol', 'symbol', { unique: false });
-            objectStore.createIndex('strike', 'strike', { unique: false });
-        }
-        
-        // Create object store for credentials
-        if (!db.objectStoreNames.contains('credentials')) {
-            db.createObjectStore('credentials', { keyPath: 'key' });
-        }
-    };
-}
-
-// ============================================
-// Service Worker Registration
-// ============================================
-
-function registerServiceWorker() {
-    if ('serviceWorker' in navigator) {
-        navigator.serviceWorker.register('sw.js')
-            .then(() => console.log('✅ Service Worker registered'))
-            .catch(err => console.error('❌ SW registration failed:', err));
-    }
-}
-
-// ============================================
-// Event Listeners
-// ============================================
-
-function setupEventListeners() {
-    // Login button
-    document.getElementById('loginBtn').addEventListener('click', handleLogin);
-    
-    // Logout button
-    document.getElementById('logoutBtn').addEventListener('click', handleLogout);
-    
-    // Symbol buttons
-    document.querySelectorAll('.btn-symbol').forEach(btn => {
-        btn.addEventListener('click', (e) => {
-            document.querySelectorAll('.btn-symbol').forEach(b => b.classList.remove('active'));
-            e.target.classList.add('active');
-            STATE.currentSymbol = e.target.dataset.symbol;
-            loadOptionChain();
-        });
-    });
-    
-    // Timeframe selector
-    document.getElementById('timeframeSelect').addEventListener('change', (e) => {
-        STATE.currentTimeframe = e.target.value;
-        updateTimeframeDisplay();
-    });
-    
-    // Auto-refresh toggle
-    document.getElementById('autoRefresh').addEventListener('change', (e) => {
-        STATE.autoRefresh = e.target.checked;
-        if (STATE.autoRefresh) {
-            startAutoRefresh();
-        } else {
-            stopAutoRefresh();
-        }
-    });
-}
-
-// ============================================
-// Login/Logout Functions
-// ============================================
-
-async function handleLogin() {
-    const apiKey = document.getElementById('apiKey').value.trim();
-    const clientCode = document.getElementById('clientCode').value.trim();
-    const password = document.getElementById('password').value.trim();
-    const totp = document.getElementById('totp').value.trim();
-    
-    if (!apiKey || !clientCode || !password) {
-        showStatus('Please fill all required fields', 'error');
-        return;
-    }
-    
-    showLoader(true);
-    showStatus('Logging in...', 'success');
-    
+async function setCookies() {
     try {
-        const response = await fetch(`${CONFIG.API_BASE}/rest/auth/angelbroking/user/v1/loginByPassword`, {
-            method: 'POST',
+        showLoader(true);
+        showAppStatus('Initializing...', 'info');
+        
+        await fetch('https://www.nseindia.com', {
+            method: 'GET',
             headers: {
-                'Content-Type': 'application/json',
-                'Accept': 'application/json',
-                'X-UserType': 'USER',
-                'X-SourceID': 'WEB',
-                'X-ClientLocalIP': 'CLIENT_LOCAL_IP',
-                'X-ClientPublicIP': 'CLIENT_PUBLIC_IP',
-                'X-MACAddress': 'MAC_ADDRESS',
-                'X-PrivateKey': apiKey
-            },
-            body: JSON.stringify({
-                clientcode: clientCode,
-                password: password,
-                totp: totp || undefined
-            })
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*'
+            }
         });
         
-        const data = await response.json();
-        
-        if (data.status && data.data) {
-            STATE.authToken = data.data.jwtToken;
-            STATE.apiKey = apiKey;
-            
-            // Save credentials
-            await saveCredentials({
-                apiKey: apiKey,
-                clientCode: clientCode,
-                token: data.data.jwtToken,
-                feedToken: data.data.feedToken
-            });
-            
-            showStatus('Login successful!', 'success');
-            
-            setTimeout(() => {
-                switchScreen('appScreen');
-                loadOptionChain();
-                startAutoRefresh();
-            }, 1000);
-            
-        } else {
-            throw new Error(data.message || 'Login failed');
-        }
+        console.log('✅ NSE cookies set');
         
     } catch (error) {
-        console.error('Login error:', error);
-        showStatus(`Login failed: ${error.message}`, 'error');
-    } finally {
-        showLoader(false);
-    }
-}
-
-function handleLogout() {
-    if (confirm('Are you sure you want to logout?')) {
-        stopAutoRefresh();
-        clearCredentials();
-        STATE.authToken = null;
-        STATE.apiKey = null;
-        switchScreen('loginScreen');
+        console.error('Cookie setup error:', error);
     }
 }
 
@@ -211,152 +76,170 @@ function handleLogout() {
 // ============================================
 
 async function loadOptionChain() {
-    if (!STATE.authToken) {
-        showAppStatus('Please login first', 'error');
-        return;
-    }
-    
     showLoader(true);
-    showAppStatus('Loading data...', 'info');
     
     try {
-        // Get spot price
-        const spotData = await getSpotPrice(STATE.currentSymbol);
-        STATE.spotPrice = spotData.ltp;
+        const symbol = STATE.currentSymbol;
         
-        // Calculate ATM strike
-        const strikeGap = CONFIG.SYMBOLS[STATE.currentSymbol].strikeGap;
-        STATE.atmStrike = Math.round(STATE.spotPrice / strikeGap) * strikeGap;
+        // Fetch option chain from NSE
+        const url = `${CONFIG.NSE_BASE}/option-chain-indices?symbol=${symbol}`;
         
-        // Update UI
-        document.getElementById('spotPrice').textContent = STATE.spotPrice.toFixed(2);
-        document.getElementById('symbolName').textContent = STATE.currentSymbol;
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*',
+                'Accept-Language': 'en-US,en;q=0.9',
+                'Referer': 'https://www.nseindia.com/option-chain'
+            },
+            credentials: 'include'
+        });
         
-        // Generate strikes (ATM ± 5)
-        const strikes = [];
-        for (let i = -5; i <= 5; i++) {
-            strikes.push(STATE.atmStrike + (i * strikeGap));
+        if (!response.ok) {
+            throw new Error(`NSE API returned ${response.status}`);
         }
         
-        // Fetch option data for all strikes
-        const optionData = await fetchOptionData(strikes);
+        const data = await response.json();
         
-        // Display data
-        displayOptionChain(optionData);
+        if (!data.records || !data.records.data) {
+            throw new Error('Invalid data format from NSE');
+        }
         
-        showAppStatus(`Updated: ${new Date().toLocaleTimeString()}`, 'success');
+        // Extract spot price
+        STATE.spotPrice = data.records.underlyingValue;
+        
+        // Calculate ATM strike
+        const strikeGap = CONFIG.SYMBOLS[symbol].strikeGap;
+        STATE.atmStrike = Math.round(STATE.spotPrice / strikeGap) * strikeGap;
+        
+        // Update header
+        document.getElementById('spotPrice').textContent = STATE.spotPrice.toFixed(2);
+        document.getElementById('symbolName').textContent = symbol;
+        
+        // Filter strikes (ATM ± 5)
+        const filteredData = filterStrikes(data.records.data, STATE.atmStrike, strikeGap);
+        
+        // Process and store OI data
+        const processedData = await processOptionData(filteredData);
+        
+        // Display
+        displayOptionChain(processedData);
+        
+        const now = new Date();
+        const timeStr = now.toLocaleTimeString('en-IN', { 
+            hour: '2-digit', 
+            minute: '2-digit',
+            second: '2-digit'
+        });
+        
+        showAppStatus(`✅ Updated: ${timeStr}`, 'success');
+        document.getElementById('lastUpdate').textContent = `Last: ${timeStr}`;
+        
+        if (STATE.isInitialLoad) {
+            STATE.isInitialLoad = false;
+            console.log('✅ Initial load complete');
+        }
         
     } catch (error) {
-        console.error('Load option chain error:', error);
-        showAppStatus(`Error: ${error.message}`, 'error');
+        console.error('Load error:', error);
+        showAppStatus(`⚠️ Error: ${error.message}`, 'error');
+        
+        // Retry after 5 seconds on error
+        if (STATE.autoRefresh) {
+            setTimeout(() => loadOptionChain(), 5000);
+        }
     } finally {
         showLoader(false);
     }
 }
 
-async function getSpotPrice(symbol) {
-    const token = CONFIG.SYMBOLS[symbol].token;
+function filterStrikes(data, atmStrike, strikeGap) {
+    const strikes = [];
     
-    const response = await fetch(`${CONFIG.API_BASE}/rest/secure/angelbroking/market/v1/quote/`, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${STATE.authToken}`,
-            'X-PrivateKey': STATE.apiKey,
-            'X-UserType': 'USER',
-            'X-SourceID': 'WEB'
-        },
-        body: JSON.stringify({
-            mode: 'LTP',
-            exchangeTokens: {
-                'NSE': [token]
-            }
-        })
-    });
-    
-    const data = await response.json();
-    
-    if (data.status && data.data && data.data.fetched) {
-        return data.data.fetched[0];
-    } else {
-        throw new Error('Failed to get spot price');
+    for (let i = -5; i <= 5; i++) {
+        const strike = atmStrike + (i * strikeGap);
+        const strikeData = data.find(d => d.strikePrice === strike);
+        
+        if (strikeData) {
+            strikes.push({
+                strike: strike,
+                isATM: strike === atmStrike,
+                CE: strikeData.CE || {},
+                PE: strikeData.PE || {}
+            });
+        }
     }
+    
+    return strikes;
 }
 
-async function fetchOptionData(strikes) {
+async function processOptionData(strikes) {
     const timestamp = Date.now();
-    const optionData = [];
+    const processedData = [];
     
-    for (const strike of strikes) {
-        const ceOI = await getOIData(strike, 'CE');
-        const peOI = await getOIData(strike, 'PE');
+    for (const strikeData of strikes) {
+        const strike = strikeData.strike;
+        
+        // CE data
+        const ceOI = strikeData.CE.openInterest || 0;
+        const ceChange = strikeData.CE.changeinOpenInterest || 0;
+        const ceVolume = strikeData.CE.totalTradedVolume || 0;
+        const ceLTP = strikeData.CE.lastPrice || 0;
+        
+        // PE data
+        const peOI = strikeData.PE.openInterest || 0;
+        const peChange = strikeData.PE.changeinOpenInterest || 0;
+        const peVolume = strikeData.PE.totalTradedVolume || 0;
+        const peLTP = strikeData.PE.lastPrice || 0;
         
         // Store in IndexedDB
         await storeOIData(timestamp, STATE.currentSymbol, strike, 'CE', ceOI);
         await storeOIData(timestamp, STATE.currentSymbol, strike, 'PE', peOI);
         
-        // Calculate changes
-        const ceChange = await calculateOIChange(strike, 'CE', ceOI);
-        const peChange = await calculateOIChange(strike, 'PE', peOI);
+        // Calculate timeframe changes
+        const ceTimeframeChange = await calculateTimeframeChange(strike, 'CE', ceOI);
+        const peTimeframeChange = await calculateTimeframeChange(strike, 'PE', peOI);
         
-        optionData.push({
+        processedData.push({
             strike: strike,
-            isATM: strike === STATE.atmStrike,
+            isATM: strikeData.isATM,
             ce: {
                 totalOI: ceOI,
-                changeOI: ceChange.total,
-                timeframeChange: ceChange.timeframe
+                changeOI: ceChange,
+                timeframeChange: ceTimeframeChange,
+                volume: ceVolume,
+                ltp: ceLTP
             },
             pe: {
                 totalOI: peOI,
-                changeOI: peChange.total,
-                timeframeChange: peChange.timeframe
+                changeOI: peChange,
+                timeframeChange: peTimeframeChange,
+                volume: peVolume,
+                ltp: peLTP
             }
         });
     }
     
-    return optionData;
+    return processedData;
 }
 
-async function getOIData(strike, optionType) {
-    try {
-        const baseOI = 10000 + Math.floor(Math.random() * 50000);
-        return baseOI;
-    } catch (error) {
-        console.error(`Error getting OI for ${strike}${optionType}:`, error);
-        return 0;
-    }
-}
-
-async function calculateOIChange(strike, optionType, currentOI) {
+async function calculateTimeframeChange(strike, optionType, currentOI) {
+    const timeframeSeconds = getTimeframeSeconds(STATE.currentTimeframe);
+    const cutoffTime = Date.now() - (timeframeSeconds * 1000);
+    
     const historicalData = await getHistoricalOI(
-        STATE.currentSymbol, 
-        strike, 
-        optionType, 
-        STATE.currentTimeframe
+        STATE.currentSymbol,
+        strike,
+        optionType,
+        cutoffTime
     );
     
-    let totalChange = 0;
-    let timeframeChange = 0;
-    
     if (historicalData.length > 0) {
-        const firstOI = historicalData[0].oi;
-        totalChange = currentOI - firstOI;
-        
-        const timeframeSeconds = getTimeframeSeconds(STATE.currentTimeframe);
-        const timeframeData = historicalData.filter(d => 
-            (Date.now() - d.timestamp) <= (timeframeSeconds * 1000)
-        );
-        
-        if (timeframeData.length > 0) {
-            timeframeChange = currentOI - timeframeData[0].oi;
-        }
+        const oldestOI = historicalData[0].oi;
+        return currentOI - oldestOI;
     }
     
-    return {
-        total: totalChange,
-        timeframe: timeframeChange
-    };
+    return 0;
 }
 
 function getTimeframeSeconds(timeframe) {
@@ -383,7 +266,6 @@ function getTimeframeSeconds(timeframe) {
 
 function displayOptionChain(data) {
     const container = document.getElementById('optionChainData');
-    if (!container) return;
     container.innerHTML = '';
     
     data.forEach(row => {
@@ -394,9 +276,9 @@ function displayOptionChain(data) {
             <div class="ce-data">
                 <div class="oi-total">OI: ${formatNumber(row.ce.totalOI)}</div>
                 <div class="oi-change ${getChangeClass(row.ce.changeOI)}">
-                    Total: ${formatChange(row.ce.changeOI)}
+                    Chg: ${formatChange(row.ce.changeOI)}
                 </div>
-                <div class="oi-timeframe">
+                <div class="oi-timeframe ${getChangeClass(row.ce.timeframeChange)}">
                     ${STATE.currentTimeframe}: ${formatChange(row.ce.timeframeChange)}
                 </div>
             </div>
@@ -408,9 +290,9 @@ function displayOptionChain(data) {
             <div class="pe-data">
                 <div class="oi-total">OI: ${formatNumber(row.pe.totalOI)}</div>
                 <div class="oi-change ${getChangeClass(row.pe.changeOI)}">
-                    Total: ${formatChange(row.pe.changeOI)}
+                    Chg: ${formatChange(row.pe.changeOI)}
                 </div>
-                <div class="oi-timeframe">
+                <div class="oi-timeframe ${getChangeClass(row.pe.timeframeChange)}">
                     ${STATE.currentTimeframe}: ${formatChange(row.pe.timeframeChange)}
                 </div>
             </div>
@@ -429,11 +311,44 @@ function formatNumber(num) {
 
 function formatChange(num) {
     const sign = num >= 0 ? '+' : '';
-    return sign + formatNumber(num);
+    return sign + formatNumber(Math.abs(num));
 }
 
 function getChangeClass(num) {
     return num >= 0 ? 'positive' : 'negative';
+}
+
+// ============================================
+// Event Listeners
+// ============================================
+
+function setupEventListeners() {
+    // Symbol buttons
+    document.querySelectorAll('.btn-symbol').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            document.querySelectorAll('.btn-symbol').forEach(b => b.classList.remove('active'));
+            e.target.classList.add('active');
+            STATE.currentSymbol = e.target.dataset.symbol;
+            loadOptionChain();
+        });
+    });
+    
+    // Timeframe selector
+    document.getElementById('timeframeSelect').addEventListener('change', (e) => {
+        STATE.currentTimeframe = e.target.value;
+        // Reload to recalculate timeframe changes
+        loadOptionChain();
+    });
+    
+    // Auto-refresh toggle
+    document.getElementById('autoRefresh').addEventListener('change', (e) => {
+        STATE.autoRefresh = e.target.checked;
+        if (STATE.autoRefresh) {
+            startAutoRefresh();
+        } else {
+            stopAutoRefresh();
+        }
+    });
 }
 
 // ============================================
@@ -446,10 +361,12 @@ function startAutoRefresh() {
     }
     
     STATE.refreshTimer = setInterval(() => {
-        if (STATE.autoRefresh && STATE.authToken) {
+        if (STATE.autoRefresh) {
             loadOptionChain();
         }
     }, CONFIG.REFRESH_INTERVAL);
+    
+    console.log('✅ Auto-refresh started (3s interval)');
 }
 
 function stopAutoRefresh() {
@@ -457,44 +374,73 @@ function stopAutoRefresh() {
         clearInterval(STATE.refreshTimer);
         STATE.refreshTimer = null;
     }
-}
-
-function updateTimeframeDisplay() {
-    if (STATE.authToken) {
-        loadOptionChain();
-    }
+    
+    console.log('⏸️ Auto-refresh stopped');
 }
 
 // ============================================
-// IndexedDB Helper Functions
+// IndexedDB Functions
 // ============================================
+
+function initDB() {
+    return new Promise((resolve, reject) => {
+        const request = indexedDB.open('OptionChainDB', 1);
+        
+        request.onerror = () => {
+            console.error('❌ Database failed');
+            reject(request.error);
+        };
+        
+        request.onsuccess = () => {
+            db = request.result;
+            console.log('✅ Database ready');
+            resolve();
+        };
+        
+        request.onupgradeneeded = (e) => {
+            db = e.target.result;
+            
+            if (!db.objectStoreNames.contains('oiData')) {
+                const objectStore = db.createObjectStore('oiData', { 
+                    keyPath: 'id', 
+                    autoIncrement: true 
+                });
+                objectStore.createIndex('timestamp', 'timestamp', { unique: false });
+                objectStore.createIndex('symbol', 'symbol', { unique: false });
+                objectStore.createIndex('strike', 'strike', { unique: false });
+                console.log('✅ Database created');
+            }
+        };
+    });
+}
 
 async function storeOIData(timestamp, symbol, strike, optionType, oi) {
+    if (!db) return;
+    
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(['oiData'], 'readwrite');
         const objectStore = transaction.objectStore('oiData');
         
-        const data = {
-            timestamp: timestamp,
-            symbol: symbol,
-            strike: strike,
-            optionType: optionType,
-            oi: oi
-        };
-        
-        const request = objectStore.add(data);
+        const request = objectStore.add({
+            timestamp,
+            symbol,
+            strike,
+            optionType,
+            oi
+        });
         
         request.onsuccess = () => resolve();
         request.onerror = () => reject(request.error);
     });
 }
 
-async function getHistoricalOI(symbol, strike, optionType, timeframe) {
+async function getHistoricalOI(symbol, strike, optionType, cutoffTime) {
+    if (!db) return [];
+    
     return new Promise((resolve, reject) => {
         const transaction = db.transaction(['oiData'], 'readonly');
         const objectStore = transaction.objectStore('oiData');
         
-        const cutoffTime = Date.now() - (86400 * 1000); // 24 hours
         const results = [];
         const request = objectStore.openCursor();
         
@@ -520,103 +466,39 @@ async function getHistoricalOI(symbol, strike, optionType, timeframe) {
     });
 }
 
-async function cleanOldData() {
-    const cutoffTime = Date.now() - (86400 * 1000); // 24 hours
+// Clean old data every hour (>24 hours)
+setInterval(() => {
+    if (!db) return;
     
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['oiData'], 'readwrite');
-        const objectStore = transaction.objectStore('oiData');
-        const index = objectStore.index('timestamp');
-        const range = IDBKeyRange.upperBound(cutoffTime);
-        
-        const request = index.openCursor(range);
-        
-        request.onsuccess = (e) => {
-            const cursor = e.target.result;
-            if (cursor) {
+    const cutoff = Date.now() - (86400 * 1000); // 24 hours
+    const transaction = db.transaction(['oiData'], 'readwrite');
+    const objectStore = transaction.objectStore('oiData');
+    const request = objectStore.openCursor();
+    
+    let deletedCount = 0;
+    
+    request.onsuccess = (e) => {
+        const cursor = e.target.result;
+        if (cursor) {
+            if (cursor.value.timestamp < cutoff) {
                 cursor.delete();
-                cursor.continue();
-            } else {
-                resolve();
+                deletedCount++;
             }
-        };
-        
-        request.onerror = () => reject(request.error);
-    });
-}
-
-setInterval(cleanOldData, 3600000);
-
-// ============================================
-// Credentials Management
-// ============================================
-
-async function saveCredentials(credentials) {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['credentials'], 'readwrite');
-        const objectStore = transaction.objectStore('credentials');
-        
-        const request = objectStore.put({
-            key: 'userCredentials',
-            data: credentials
-        });
-        
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function getCredentials() {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['credentials'], 'readonly');
-        const objectStore = transaction.objectStore('credentials');
-        
-        const request = objectStore.get('userCredentials');
-        
-        request.onsuccess = () => resolve(request.result?.data);
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function clearCredentials() {
-    return new Promise((resolve, reject) => {
-        const transaction = db.transaction(['credentials'], 'readwrite');
-        const objectStore = transaction.objectStore('credentials');
-        
-        const request = objectStore.delete('userCredentials');
-        
-        request.onsuccess = () => resolve();
-        request.onerror = () => reject(request.error);
-    });
-}
-
-async function checkLoginStatus() {
-    const credentials = await getCredentials();
-    
-    if (credentials && credentials.token) {
-        STATE.authToken = credentials.token;
-        STATE.apiKey = credentials.apiKey;
-        switchScreen('appScreen');
-        loadOptionChain();
-        startAutoRefresh();
-    }
-}
+            cursor.continue();
+        } else {
+            if (deletedCount > 0) {
+                console.log(`🗑️ Cleaned ${deletedCount} old records`);
+            }
+        }
+    };
+}, 3600000); // Every hour
 
 // ============================================
 // UI Helper Functions
 // ============================================
 
-function switchScreen(screenId) {
-    document.querySelectorAll('.screen').forEach(screen => {
-        screen.classList.remove('active');
-    });
-    const targetScreen = document.getElementById(screenId);
-    if (targetScreen) targetScreen.classList.add('active');
-}
-
 function showLoader(show) {
     const loader = document.getElementById('loader');
-    if (!loader) return;
     if (show) {
         loader.classList.remove('hidden');
     } else {
@@ -624,10 +506,14 @@ function showLoader(show) {
     }
 }
 
-function showStatus(msg, type) {
-    console.log(`Status [${type}]: ${msg}`);
+function showAppStatus(message) {
+    document.getElementById('statusMsg').textContent = message;
 }
 
-function showAppStatus(msg, type) {
-    console.log(`App Status [${type}]: ${msg}`);
+function registerServiceWorker() {
+    if ('serviceWorker' in navigator) {
+        navigator.serviceWorker.register('sw.js')
+            .then(() => console.log('✅ Service Worker registered'))
+            .catch(err => console.error('❌ SW registration failed:', err));
+    }
 }

@@ -1,18 +1,3 @@
 {
-  "version": 2,
-  "functions": {
-    "api/nse-proxy.js": {
-      "maxDuration": 10
-    }
-  },
-  "rewrites": [
-    {
-      "source": "/api/(.*)",
-      "destination": "/api/$1"
-    },
-    {
-      "source": "/(.*)",
-      "destination": "/$1"
-    }
-  ]
+  "version": 2
 }
